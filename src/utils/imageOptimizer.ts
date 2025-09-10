@@ -11,13 +11,13 @@ export interface ImageOptimizationResult {
 }
 
 export class ImageOptimizer {
-  // Optimala inställningar för OCR
-  private static readonly MAX_WIDTH = 2048;
-  private static readonly MAX_HEIGHT = 2048;
-  private static readonly MIN_WIDTH = 800;
-  private static readonly MIN_HEIGHT = 600;
-  private static readonly QUALITY = 0.85; // 85% kvalitet för bra balans
-  private static readonly MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB max
+  // Förbättrade inställningar för OCR
+  private static readonly MAX_WIDTH = 3000;  // Ökat för bättre textläsbarhet
+  private static readonly MAX_HEIGHT = 3000;
+  private static readonly MIN_WIDTH = 1200;  // Ökat minimum
+  private static readonly MIN_HEIGHT = 900;
+  private static readonly QUALITY = 0.92;    // Högre kvalitet för text
+  private static readonly MAX_FILE_SIZE = 4 * 1024 * 1024; // 4MB för bättre kvalitet
 
   static async optimizeImage(file: File): Promise<ImageOptimizationResult> {
     return new Promise((resolve, reject) => {
@@ -48,6 +48,9 @@ export class ImageOptimizer {
 
           // Rita bilden med nya dimensioner
           ctx.drawImage(img, 0, 0, width, height);
+
+          // Förbättra kontrast för bättre OCR
+          this.enhanceForOCR(canvas, ctx);
 
           // Konvertera till blob med optimal kvalitet
           canvas.toBlob(
@@ -134,5 +137,25 @@ export class ImageOptimizer {
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  // Förbättra kontrast för bättre textläsning
+  static enhanceForOCR(canvas: HTMLCanvasElement, ctx: CanvasRenderingContext2D) {
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Öka kontrast för bättre textläsning
+    for (let i = 0; i < data.length; i += 4) {
+      // Konvertera till gråskala med förbättrad kontrast
+      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+      const enhanced = gray > 128 ? Math.min(255, gray * 1.2) : Math.max(0, gray * 0.8);
+      
+      data[i] = enhanced;     // R
+      data[i + 1] = enhanced; // G
+      data[i + 2] = enhanced; // B
+      // Alpha channel (data[i + 3]) förblir oförändrad
+    }
+    
+    ctx.putImageData(imageData, 0, 0);
   }
 }

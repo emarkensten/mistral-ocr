@@ -1,7 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { PerformanceMonitor } from '@/utils/performanceMonitor';
+import { ResultCache } from '@/utils/resultCache';
+import { ReceiptValidator } from '@/utils/receiptValidator';
+
+// Retry-logik för API-anrop
+async function callOpenAIWithRetry(
+  requestBody: object, 
+  apiEndpoint: string, 
+  maxRetries: number = 3
+): Promise<Response> {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const controller = new AbortController();
+      const timeoutMs = attempt * 40000; // Progressiv timeout
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      
+      const response = await fetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify(requestBody)
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (response.ok) {
+        return response;
+      }
+      
+      // Om rate limit, vänta innan retry
+      if (response.status === 429) {
+        const retryAfter = parseInt(response.headers.get('retry-after') || '5');
+        console.log(`[OCR] Rate limited, väntar ${retryAfter}s innan retry ${attempt}`);
+        await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        continue;
+      }
+      
+      // För andra fel, kasta error
+      if (response.status >= 500) {
+        lastError = new Error(`Server error: ${response.status}`);
+        console.log(`[OCR] Server error på försök ${attempt}:`, response.status);
+        continue;
+      }
+      
+      return response; // Returnera även om det är ett fel för att hantera det
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxRetries) {
+        console.log(`[OCR] Försök ${attempt} misslyckades, försöker igen om ${1000 * attempt}ms`);
+        await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      }
+    }
+  }
+  
+  throw lastError;
+}
 
 export async function POST(request: NextRequest) {
   console.log('[OCR] API route hit');
+  PerformanceMonitor.start('total_request');
   
   try {
     const formData = await request.formData();
@@ -17,6 +79,11 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: 'Ingen bild hittades' }, { status: 400 });
     }
+
+    // Kontrollera cache först
+    const cacheKey = ResultCache.generateImageKey(file, selectedModel);
+    
+    const cachedResult = await ResultCache.getOrCompute(cacheKey, async () => {
 
     // Konvertera bilden till base64
     const bytes = await file.arrayBuffer();
@@ -72,7 +139,18 @@ export async function POST(request: NextRequest) {
           content: [
             {
               type: 'text',
-              text: `Analysera detta kvitto och extrahera information enligt schemat. Fokusera på att identifiera butikens namn, datum, totalsumma, valuta och kostnadskategori. Om information saknas eller är otydlig, sätt confidence_score lägre och requires_manual_review till true.`
+              text: `Du är en expert på att analysera svenska kvitton för exakt dataextraktion.
+
+VIKTIGA INSTRUKTIONER:
+1. Extrahera ALL text först innan analys
+2. Var extra noggrann med datum (format: YYYY-MM-DD) och belopp
+3. Om text är suddig eller delvis skymd, gör ditt bästa uppskattning men sätt confidence_score lägre
+4. För transport-kvitton, identifiera specifikt: tågnummer, avgångsstation, ankomststation om tillgängligt
+5. Kategorisera korrekt: Transport för tågbiljetter, Mat/Dryck för ombordköp, Boende för hotell, etc.
+6. Kontrollera att totalsumman stämmer med summerade items om båda finns
+7. Sätt requires_manual_review till true om någon viktig information är osäker
+
+Analysera detta kvitto och extrahera information enligt schemat:`
             },
             {
               type: 'image_url',
@@ -94,27 +172,13 @@ export async function POST(request: NextRequest) {
 
     console.log('[OCR] Making API request...');
 
-    // Längre timeout för GPT-5 (120s), kortare för andra (60s)
-    const timeoutMs = isGPT5Model ? 120000 : 60000;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-    console.log(`[OCR] Timeout set to ${timeoutMs/1000} seconds`);
+    PerformanceMonitor.start('api_call');
+    const openaiResponse = await callOpenAIWithRetry(requestBody, apiEndpoint);
+    PerformanceMonitor.end('api_call');
 
-    try {
-      const openaiResponse = await fetch(apiEndpoint, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify(requestBody)
-      });
+    console.log('[OCR] OpenAI response status:', openaiResponse.status);
 
-      clearTimeout(timeoutId);
-      console.log('[OCR] OpenAI response status:', openaiResponse.status);
-
-      if (!openaiResponse.ok) {
+    if (!openaiResponse.ok) {
         let errorBody;
         try {
           errorBody = await openaiResponse.json();
@@ -207,25 +271,29 @@ export async function POST(request: NextRequest) {
       }
 
       console.log('[OCR] Successfully parsed data');
-      return NextResponse.json({ data: parsedData });
+      return parsedData;
+    });
 
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      console.error('[OCR] Fetch error:', fetchError);
-      
-      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-        return NextResponse.json({
-          error: `Timeout efter ${timeoutMs/1000} sekunder för modell ${selectedModel}. Modellen svarar för långsamt.`,
-          model: selectedModel,
-          timeout: true,
-          timeout_seconds: timeoutMs/1000
-        }, { status: 408 });
+    // Validera och förbättra data
+    PerformanceMonitor.start('validation');
+    const validatedData = ReceiptValidator.validateAndEnhance(cachedResult);
+    PerformanceMonitor.end('validation');
+
+    const totalTime = PerformanceMonitor.end('total_request');
+    
+    console.log(`[OCR] Request completed in ${totalTime.toFixed(2)}ms`);
+    console.log(`[OCR] Validation summary: ${ReceiptValidator.getValidationSummary(validatedData)}`);
+
+    return NextResponse.json({ 
+      data: validatedData,
+      performance: {
+        total_time_ms: totalTime,
+        cache_hit: cachedResult === validatedData // Enkel check om det var cache hit
       }
-      
-      throw fetchError;
-    }
+    });
 
   } catch (error) {
+    PerformanceMonitor.end('total_request');
     console.error('[OCR] API error:', error);
     
     return NextResponse.json({
