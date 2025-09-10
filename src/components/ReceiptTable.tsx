@@ -11,19 +11,21 @@ import {
 } from "@/components/ui/table";
 
 interface ReceiptItem {
-  name: string;
-  quantity?: number;
-  price?: number;
-  total?: number;
+  description: string;
+  price: number;
 }
 
 interface ReceiptData {
-  merchant?: string;
+  merchant_name?: string;
   date?: string;
-  total?: number;
+  time?: string;
+  total_amount?: number;
+  currency?: string;
+  expense_category?: string;
   items?: ReceiptItem[];
-  tax?: number;
-  subtotal?: number;
+  payment_method?: string;
+  confidence_score?: number;
+  requires_manual_review?: boolean;
 }
 
 interface ReceiptTableProps {
@@ -31,11 +33,11 @@ interface ReceiptTableProps {
 }
 
 export function ReceiptTable({ data }: ReceiptTableProps) {
-  const formatCurrency = (amount: number | undefined) => {
+  const formatCurrency = (amount: number | undefined, currency: string = 'SEK') => {
     if (amount === undefined) return "N/A";
     return new Intl.NumberFormat('sv-SE', {
       style: 'currency',
-      currency: 'SEK'
+      currency: currency
     }).format(amount);
   };
 
@@ -56,18 +58,43 @@ export function ReceiptTable({ data }: ReceiptTableProps) {
       <CardContent>
         <div className="space-y-6">
           {/* Merchant Info */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
               <h4 className="font-medium text-sm text-muted-foreground">Butik</h4>
-              <p className="text-lg">{data.merchant || "N/A"}</p>
+              <p className="text-lg">{data.merchant_name || "N/A"}</p>
             </div>
             <div>
               <h4 className="font-medium text-sm text-muted-foreground">Datum</h4>
               <p className="text-lg">{formatDate(data.date)}</p>
             </div>
             <div>
+              <h4 className="font-medium text-sm text-muted-foreground">Tid</h4>
+              <p className="text-lg">{data.time || "N/A"}</p>
+            </div>
+            <div>
               <h4 className="font-medium text-sm text-muted-foreground">Totalt</h4>
-              <p className="text-lg font-semibold">{formatCurrency(data.total)}</p>
+              <p className="text-lg font-semibold">{formatCurrency(data.total_amount, data.currency)}</p>
+            </div>
+          </div>
+
+          {/* Additional Info */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <h4 className="font-medium text-sm text-muted-foreground">Kategori</h4>
+              <p className="text-lg">{data.expense_category || "N/A"}</p>
+            </div>
+            <div>
+              <h4 className="font-medium text-sm text-muted-foreground">Betalningsmetod</h4>
+              <p className="text-lg">{data.payment_method || "N/A"}</p>
+            </div>
+            <div>
+              <h4 className="font-medium text-sm text-muted-foreground">Förtroende</h4>
+              <p className="text-lg">
+                {data.confidence_score ? `${Math.round(data.confidence_score * 100)}%` : "N/A"}
+                {data.requires_manual_review && (
+                  <span className="ml-2 text-orange-600 text-sm">(Kräver granskning)</span>
+                )}
+              </p>
             </div>
           </div>
 
@@ -78,24 +105,16 @@ export function ReceiptTable({ data }: ReceiptTableProps) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Produkt</TableHead>
-                    <TableHead className="text-right">Antal</TableHead>
+                    <TableHead>Beskrivning</TableHead>
                     <TableHead className="text-right">Pris</TableHead>
-                    <TableHead className="text-right">Totalt</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {data.items.map((item, index) => (
                     <TableRow key={index}>
-                      <TableCell className="font-medium">{item.name}</TableCell>
+                      <TableCell className="font-medium">{item.description}</TableCell>
                       <TableCell className="text-right">
-                        {item.quantity || "N/A"}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatCurrency(item.price)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {formatCurrency(item.total)}
+                        {formatCurrency(item.price, data.currency)}
                       </TableCell>
                     </TableRow>
                   ))}
@@ -107,21 +126,9 @@ export function ReceiptTable({ data }: ReceiptTableProps) {
           {/* Summary */}
           <div className="border-t pt-4">
             <div className="space-y-2">
-              {data.subtotal && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Delsumma:</span>
-                  <span>{formatCurrency(data.subtotal)}</span>
-                </div>
-              )}
-              {data.tax && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Moms:</span>
-                  <span>{formatCurrency(data.tax)}</span>
-                </div>
-              )}
-              <div className="flex justify-between font-semibold text-lg border-t pt-2">
+              <div className="flex justify-between font-semibold text-lg">
                 <span>Totalt:</span>
-                <span>{formatCurrency(data.total)}</span>
+                <span>{formatCurrency(data.total_amount, data.currency)}</span>
               </div>
             </div>
           </div>

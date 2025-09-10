@@ -4,7 +4,8 @@ import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Upload, X } from "lucide-react";
+import { Upload, X, Loader2, Zap } from "lucide-react";
+import { ImageOptimizer } from "@/utils/imageOptimizer";
 
 interface ImageUploadProps {
   onImageUpload: (file: File) => void;
@@ -13,16 +14,50 @@ interface ImageUploadProps {
 
 export function ImageUpload({ onImageUpload, isLoading = false }: ImageUploadProps) {
   const [preview, setPreview] = useState<string | null>(null);
+  const [optimizationInfo, setOptimizationInfo] = useState<string | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
     const file = acceptedFiles[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        setPreview(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-      onImageUpload(file);
+      setIsOptimizing(true);
+      
+      try {
+        let finalFile = file;
+        let optimizationMessage = null;
+
+        // Optimera bilden om den är stor
+        if (ImageOptimizer.shouldOptimize(file)) {
+          const result = await ImageOptimizer.optimizeImage(file);
+          finalFile = result.optimizedFile;
+          
+          const savings = ((1 - result.compressionRatio) * 100).toFixed(0);
+          optimizationMessage = `Optimerad: ${ImageOptimizer.formatFileSize(result.originalSize)} → ${ImageOptimizer.formatFileSize(result.optimizedSize)} (${savings}% mindre)`;
+        }
+
+        // Visa förhandsvisning
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPreview(reader.result as string);
+          setOptimizationInfo(optimizationMessage);
+        };
+        reader.readAsDataURL(finalFile);
+        
+        // Skicka den optimerade filen
+        onImageUpload(finalFile);
+      } catch (error) {
+        console.error('Bildoptimering misslyckades:', error);
+        // Fallback: använd originalfilen
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPreview(reader.result as string);
+          setOptimizationInfo("Optimering misslyckades, använder original");
+        };
+        reader.readAsDataURL(file);
+        onImageUpload(file);
+      } finally {
+        setIsOptimizing(false);
+      }
     }
   }, [onImageUpload]);
 
@@ -37,6 +72,7 @@ export function ImageUpload({ onImageUpload, isLoading = false }: ImageUploadPro
 
   const clearImage = () => {
     setPreview(null);
+    setOptimizationInfo(null);
   };
 
   return (
@@ -55,16 +91,32 @@ export function ImageUpload({ onImageUpload, isLoading = false }: ImageUploadPro
             `}
           >
             <input {...getInputProps()} />
-            <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium mb-2">
-              {isDragActive ? "Släpp kvittot här..." : "Ladda upp kvitto"}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Dra och släpp en bild eller klicka för att välja fil
-            </p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Stödda format: JPG, PNG, GIF, BMP, WebP
-            </p>
+            {isOptimizing ? (
+              <>
+                <Loader2 className="mx-auto h-12 w-12 text-primary mb-4 animate-spin" />
+                <p className="text-lg font-medium mb-2">Optimerar bild...</p>
+                <p className="text-sm text-muted-foreground">
+                  Anpassar storlek för bästa OCR-resultat
+                </p>
+              </>
+            ) : (
+              <>
+                <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                <p className="text-lg font-medium mb-2">
+                  {isDragActive ? "Släpp kvittot här..." : "Ladda upp kvitto"}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Dra och släpp en bild eller klicka för att välja fil
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Stödda format: JPG, PNG, GIF, BMP, WebP
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1">
+                  <Zap className="h-3 w-3" />
+                  Stora bilder optimeras automatiskt
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <div className="relative">
@@ -83,6 +135,12 @@ export function ImageUpload({ onImageUpload, isLoading = false }: ImageUploadPro
             >
               <X className="h-4 w-4" />
             </Button>
+            {optimizationInfo && (
+              <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                <Zap className="h-3 w-3" />
+                {optimizationInfo}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

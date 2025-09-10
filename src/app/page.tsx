@@ -4,28 +4,32 @@ import { useState } from "react";
 import { ImageUpload } from "@/components/ImageUpload";
 import { JsonDisplay } from "@/components/JsonDisplay";
 import { ReceiptTable } from "@/components/ReceiptTable";
+import { ModelSelector } from "@/components/ModelSelector";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { FileText, Table } from "lucide-react";
 
 interface ReceiptData {
-  merchant?: string;
+  merchant_name?: string;
   date?: string;
-  total?: number;
+  time?: string;
+  total_amount?: number;
+  currency?: string;
+  expense_category?: string;
   items?: Array<{
-    name: string;
-    quantity?: number;
-    price?: number;
-    total?: number;
+    description: string;
+    price: number;
   }>;
-  tax?: number;
-  subtotal?: number;
+  payment_method?: string;
+  confidence_score?: number;
+  requires_manual_review?: boolean;
 }
 
 export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState("gpt-5-mini-2025-08-07");
 
   const handleImageUpload = async (file: File) => {
     setIsLoading(true);
@@ -38,6 +42,9 @@ export default function Home() {
 
       const response = await fetch('/api/ocr', {
         method: 'POST',
+        headers: {
+          'X-Model': selectedModel,
+        },
         body: formData,
       });
 
@@ -60,11 +67,17 @@ export default function Home() {
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         {/* Header */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold tracking-tight mb-2">
-            Mistral OCR Demo
-          </h1>
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <h1 className="text-4xl font-bold tracking-tight">
+              SJ Kvitto OCR
+            </h1>
+            <ModelSelector 
+              selectedModel={selectedModel}
+              onModelChange={setSelectedModel}
+            />
+          </div>
           <p className="text-xl text-muted-foreground">
-            Ladda upp ett kvitto och se hur AI tolkar innehållet
+            Ladda upp ett kvitto och få strukturerad data för SJ förseningsersättning
           </p>
         </div>
 
