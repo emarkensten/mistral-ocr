@@ -9,27 +9,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-interface ReceiptItem {
-  description: string;
-  price: number;
-}
-
-interface ReceiptData {
-  merchant_name?: string;
-  date?: string;
-  time?: string;
-  total_amount?: number;
-  currency?: string;
-  expense_category?: string;
-  items?: ReceiptItem[];
-  payment_method?: string;
-  confidence_score?: number;
-  requires_manual_review?: boolean;
-}
+import { ValidatedReceiptData } from "@/utils/receiptValidator";
 
 interface ReceiptTableProps {
-  data: ReceiptData;
+  data: ValidatedReceiptData;
 }
 
 export function ReceiptTable({ data }: ReceiptTableProps) {
